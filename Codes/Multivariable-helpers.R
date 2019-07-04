@@ -37,6 +37,7 @@ shape = 20, text_size = 3, banded = TRUE))
 # 
 # Testing assumption of proportional hazards
 phTest <- cox.zph(model)
+phTestp <- ggcoxzph(phTest)
 # If not significant for each variable then PH assumption is meet, 
 # else use variable*time for affected variables to reconstruct the model
 # 
@@ -48,7 +49,7 @@ IO <- ggcoxdiagnostics(model, type = "deviance",
                  ggtheme = theme_bw(15))
 # If symmetric i.e around 0 then non influential observation,
 # else consider adjusting variables and cases, must use scaled variables
-Res <- list("FM" = fm, "PHtest" = phTest, "IOtest" = IO)
+Res <- list("FM" = fm, "PHtest" = phTest, "PHtestP" = phTestp, "IOtest" = IO)
 return(Res)
 }
 # Usage
