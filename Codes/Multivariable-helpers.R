@@ -58,6 +58,7 @@ DD <- ANENEFOHR(cmod)
 DD$FM
 DD$PHtest
 DD$IOtest
+DD$PHtest
 
 # Ploting kp
 aKP <- function(KPobj) {
