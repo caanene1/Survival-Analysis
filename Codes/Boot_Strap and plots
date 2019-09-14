@@ -1,0 +1,278 @@
+set.seed(34)
+library(survival)
+library(prodlim)
+# Ploting kp
+aKP <- function(KPobj) {
+  plot(KPobj,
+       confint.citype = "shadow",
+       confInt.density = 0.2,
+       confint.lwd = 1,
+       lwd = 1.5,
+       atrisk.labels = paste("", c("Low", "Intermediate", "High"),": "),
+       col = c("blue", "black", "red"),
+       atrisk.title = "At Risk",
+       xlab = "Months Disease Progression/Free",  # label for x-axis
+       legend.x = "bottomleft", # positition of legend
+       legend.cex = 0.85, # font size of legend
+       legend.title = "Risk Groups\n", # 
+       marktime = TRUE, #Censored
+       background = FALSE,
+       atrisk.cex = 1,
+       # minAtrisk = 0, #applying a minimun at risk cutoff journal requirment
+       atrisk.interspace = 1.2,
+       confint = TRUE, #Confidence interval
+       automar = TRUE,  #search and find the right number at risk
+       xlim = c(0,160), #Range of Months printed on the graph
+       atrisk.at = seq(0, 160, 24), # seqeucance of where to put at risk numbers
+       logrank = TRUE) # show log-rank p-value
+}
+### Usage
+# Replace time, cens and group with the correct column names in data
+kpobj <- prodlim(Hist(DFM,DFS) ~ Risk, ColonRes, grid = NULL)
+aKP(kpobj)
+#####
+# BootStrap
+mRNA <- read.delim("~/Desktop/Data_bootstrap/data_RNA_Seq_v2_mRNA_median_Zscores.txt", row.names = 1)
+clinic <- read.delim("~/Desktop/Data_bootstrap/clinical_data_patient.txt", row.names = 1)
+
+## Prepare data, did some manual handiling beforehand
+mRNA1 <- mRNA[c(2:499)]
+#
+mRNA1$NAcount <- rowSums(is.na(mRNA1))
+# Remove if more than half is NA
+mRNA1a <- subset(mRNA1, NAcount < 250)
+# Replace remaining NAs to 
+mRNA1a[is.na(mRNA1a)] <- 0
+#
+drop <- c("TCGA.V1.A9O5.06", "NAcount")
+mRNA1b <- mRNA1a[ , !(names(mRNA1a) %in% drop)]
+#
+rownames(clinic) <- c("status", "time")
+#
+dat <- rbind(clinic, mRNA1b)
+# Clean rownames out to allow the iteration
+rownames(dat) <- gsub("-", "_", rownames(dat))
+
+##########################################################################
+##########################################################################
+##########################################################################
+bootmtv <- function(xx, si=36, n=100000) { 
+# si = size of the things
+#
+X = as.data.frame(t(xx)) # Remember to unit test this
+# Sort the names of the variables
+
+# Define the transcriptome
+drop1 <- c("status", "time")
+wT = unique(rownames(xx))
+wT = wT[!wT %in% drop1]
+# Drop "time" and "status" from the data
+#si = 36 # Size of the random panel
+# Sampling
+gene_boot = lapply(1:n, function(x, a) sample(a, size = si, replace = F), a = wT) 
+
+# Set the formular
+forma <- lapply(gene_boot, function(x) as.formula(paste("Surv(time, status) ~ ", 
+                                                        paste(x, collapse = "+"))))
+# Remove the old data 
+rm(gene_boot)
+#
+mtvmods <- lapply(forma, function(x){coxph(x, X)})
+rm(forma)
+#
+# Extract data 
+res <- lapply(mtvmods,
+                function(x){ 
+                  x <- summary(x)
+                  p.value <- signif(x$logtest["pvalue"], digits = 3)
+                  return(p.value)
+                })
+# Remove things 
+rm(mtvmods)
+#
+Res <- do.call(rbind.data.frame, res)
+names(Res) <- "p.value"
+rm(res)
+return(Res)
+}
+# 
+# Usage 
+Res <- bootmtv(dat, si = 36, n = 100000)
+# Write to disk to avoid issues
+write.csv(Res, file = "100000bootstrap.csv")
+##
+################################################
+################################################
+## Subset the list to match 
+# GL <- subset(GL, GL$ID %in% mRNAf$names) # Used in a different case
+# Do the next sorting
+mRNAf <- mRNA[c(2:499)]
+mRNAf <- mRNA
+mRNAf$names <- rownames(mRNAf)
+#
+mRNAf <- subset(mRNAf, mRNAf$names %in% GL$ID)
+#
+drop <- c("TCGA.V1.A9O5.06", "names")
+mRNAf <- mRNAf[ , !(names(mRNAf) %in% drop)]
+# Replace remaining NAs to 
+mRNAf[is.na(mRNAf)] <- 0
+# Combine it
+dat <- rbind(clinic, mRNAf)
+#
+# Set Group names
+covar <- unique(GL["Group"])
+#
+forma <- sapply(covar,
+                  function(x) paste(as.character(x)))
+#
+umods <- lapply(forma, function(x){subset(GL, Group == x)})
+#
+Panel <- lapply(umods, function(x) as.formula(paste("Surv(time, status) ~ ", 
+                                                          paste(x$ID, collapse = "+"))))
+#
+X = as.data.frame(t(dat))
+###
+mods <- lapply(Panel, function(x){coxph(x, X)})
+################################################################
+################################################################
+################################################################
+## Based on the Panel models above 
+# Gamma = 1.423e-15
+# Cuzik = 0.001036
+# Erhor = 0.002789
+############### Insert marker column in the Res file
+Res$Gamma_bs <- cut(Res$p.value, breaks = c(-Inf, 1.423e-15, Inf),
+                    labels = c("Less", "More"))
+#
+Res$Cuzik_bs <- cut(Res$p.value, breaks = c(-Inf, 0.001036, Inf),
+                    labels = c("Less", "More"))
+#
+Res$Erhor_bs <- cut(Res$p.value, breaks = c(-Inf, 0.002789, Inf),
+                    labels = c("Less", "More"))
+## Calculate the emperical p-values
+# For empirical p value count how many times the p value obtained from the random bootstrap is 
+# smaller than the one observed your method, and divide this number by 
+# the number of simulations performed (in this case 100000)
+# Equation_emperical p-values = count_less_than / number of bootstrap
+# Hence emperical p-values in this are
+Gamma = 0
+Cuzik = 0.56274
+Erhor = 0.69076
+##
+##
+write.csv(Res, file = "Emperical_Gamma_0_Cuzik_0.56274_Erhor_0.69076.csv")
+write.csv(GL, file = "Gene_names_panels.csv")
+
+############################################################################
+############################################################################
+## Get the coefficients above for the next analysis, i.e testing the c-index 
+## on the control panel 
+Gamma_coefs <- as.data.frame(mods[[1]][["coefficients"]])
+write.csv(Gamma_coefs, file = "Gamma_coefs.csv")
+Cuzik_coefs <- as.data.frame(mods[[2]][["coefficients"]])
+write.csv(Cuzik_coefs, file = "Cuzik_coefs.csv")
+Erhor_coefs <- as.data.frame(mods[[3]][["coefficients"]])
+write.csv(Erhor_coefs, file = "Erhor_coefs.csv")
+####
+# Get the Entrze from the TCGA data and export for storage 
+IDsub <- subset(mRNA, rownames(mRNA) %in% GL$ID)
+IDsub$Symbol <- rownames(IDsub)
+IDsub <- IDsub[c(1, 500)]
+IDsub <- merge(IDsub, GL, by.x = "Symbol", by.y = "ID")
+## Subset the MSKCC to get the data 
+MSKCC_allp <- subset(mRNA_MSKCC, mRNA_MSKCC$Entrez_Gene_Id %in% IDsub$Entrez_Gene_Id)
+MSKCC_allp <- merge(IDsub, MSKCC_allp, by = "Entrez_Gene_Id", all = TRUE)
+## Subset the columns to only patients with suitable clinical information
+Add <- MSKCC_allp[c(1,2,3)]
+MSKCC_allp <- MSKCC_allp[ , (names(MSKCC_allp) %in% clinic_mskcc$ID)]
+MSKCC_allp <- cbind(Add, MSKCC_allp)
+## The matching clinic 
+clin_mskc <- subset(clinic_mskcc, clinic_mskcc$ID %in% names(MSKCC_allp))
+# Write to file 
+write.csv(MSKCC_allp, file = "fMSKCC.csv")
+write.csv(clin_mskc, file = "clin_mskc.csv")
+##### Do manual things and sort it out
+
+
+########################################################################################
+########################################################################################
+########################################################################################
+# Ignore the Risk score included in the file from the surv_predict as this need to chnage 
+# over time
+
+##
+
+## Good
+# You need to recaculate the models using the full TCGA
+Gamma <- coxph(as.formula(paste(
+  "Surv(DFM, DFS) ~ ",
+  paste(names(Gamma_P[4:20]), collapse = "+")
+)), data = Gamma_P)
+#
+Gamma_P$Score <- predict(Gamma, type = "lp")
+#
+summary(Gamma_P$Score)
+Gamma_P$Risk <- cut(Gamma_P$Score, breaks = c(-Inf, -0.3, 0.3, Inf),
+                   labels = c("Low", "Intermediate", "High"))
+# write
+write.csv(Gamma_P, file = "Gamma_P.csv")
+
+###
+Gamma$Risk1 <- cut(Gamma$Score, breaks = c(-Inf, -1, 1, Inf),
+                   labels = c("Low", "Intermediate", "High"))
+#
+Cuzik$Risk1 <- cut(Cuzik$Score, breaks = c(-Inf, -0.4, 0.3, Inf),
+                   labels = c("Low", "Intermediate", "High"))
+#
+Erhor$Risk1 <- cut(Erhor$Score, breaks = c(-Inf, -0.3, 0.3, Inf),
+                   labels = c("Low", "Intermediate", "High"))
+
+##
+aKP <- function(KPobj) {
+  plot(KPobj,
+       confint.citype = "shadow",
+       confInt.density = 6,
+       confint.lwd = 1,
+       lwd = 1,
+       atrisk.labels = paste("", c("High", "Intermediate", "Low"),": "),
+       col = c("red", "black", "blue"),
+       atrisk.title = "At Risk",
+       xlab = "Months Disease Progression/Free",  # label for x-axis
+       legend.x = "bottomleft", # positition of legend
+       legend.cex = 0.85, # font size of legend
+       legend.title = "Risk Groups\n", # 
+       marktime = TRUE, #Censored
+       background = FALSE,
+       atrisk.cex = 1,
+       # minAtrisk = 0, #applying a minimun at risk cutoff journal requirment
+       atrisk.interspace = 1.2,
+       confint = TRUE, #Confidence interval
+       automar = TRUE,  #search and find the right number at risk
+       xlim = c(0,160), #Range of Months printed on the graph
+       atrisk.at = seq(0, 160, 24), # seqeucance of where to put at risk numbers
+       logrank = TRUE) # show log-rank p-value
+}
+
+# Plot the KP for the MSKCC
+kpobj <- prodlim(Hist(DFM, DFS) ~ Risk, Gamma_P, grid = NULL)
+aKP(kpobj)
+##
+###
+
+dft <- coxph(Surv(DFM, DFS) ~ factor(Risk, levels = c("Low", "Intermediate", "High")), Gamma_P)
+summary(dft)
+#
+
+
+##########################################################################
+##########################################################################
+##########################################################################
+# Plot the Gleason Grade over Risk scores to use in the Figure 2
+library(ggpubr)
+#
+p <- ggboxplot(Gamma_P, x = "Gleason", y = "Score",
+               color = "Gleason", palette = "Reds",
+               add = "jitter", shape = "Gleason")
+p + stat_compare_means(label.y = 5)
+
+# Kruskal-Wallis, p = 0.074
