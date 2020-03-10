@@ -1,3 +1,8 @@
+pak <- c("surival", "forestmodel", "survminer", "prodlim", "survivalROC")
+for (i in pak){
+install.packages(i)
+}
+
 # Required packages
 library(survival)
 library(forestmodel)
